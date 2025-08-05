@@ -7,12 +7,12 @@ import { useWorldStore } from "../store/worldStore";
 import { usePlayerStore } from "../store/playerStore";
 
 import { createRNG } from "../logic/rng";
-import { generateTerrain } from "../logic/terrain";
 import { generateCreatures, type Creature } from "../logic/creatures";
 import { generateWeather, type Weather } from "../logic/weather";
 
 import { Howl } from "howler";
 import Landscape from "./Landscape";
+import { Sky } from "@react-three/drei";
 
 // --- Particle Rain ---
 function RainParticles({ rainLevel }: { rainLevel: number }) {
@@ -154,9 +154,10 @@ function WorldScene() {
     useWorldStore();
   const rng = useMemo(() => createRNG(piSegment), [piSegment]);
 
-  const terrain = useMemo(() => generateTerrain(rng), [rng]);
   const newCreatures = useMemo(() => generateCreatures(rng), [rng]);
   const newWeather = useMemo(() => generateWeather(rng), [rng]);
+
+  const sunPos = useRef(new THREE.Vector3(100, 100, 0));
 
   // Update global store if new data
   useEffect(() => {
@@ -166,20 +167,33 @@ function WorldScene() {
 
   useAmbientSounds(weather);
 
+  useFrame(({ clock }) => {
+    const t = clock.getElapsedTime() * 0.05; // slower cycle
+    const radius = 100;
+    sunPos.current.set(Math.sin(t) * radius, Math.cos(t) * radius, 0);
+  });
+
   return (
     <>
+      {/* ☁️ Dynamic Sky */}
+      <Sky
+        distance={450000}
+        sunPosition={sunPos.current.toArray()}
+        inclination={0.5}
+        azimuth={0.25}
+      />
+      <directionalLight
+        position={sunPos.current.toArray()}
+        intensity={1.5}
+        castShadow
+      />
+
       {/* Weather */}
       <fog attach="fog" args={["#aaccee", 10, 80]} />
       <ambientLight intensity={0.5} />
-      <directionalLight position={[20, 30, 10]} intensity={1.5} castShadow />
 
       {/* Terrain */}
-      {terrain.map(({ x, z, height }, i) => (
-        <mesh key={i} position={[x, height / 2, z]}>
-          <boxGeometry args={[1, height, 1]} />
-          <meshStandardMaterial color={`hsl(${height * 60}, 70%, 50%)`} />
-        </mesh>
-      ))}
+      <Landscape />
 
       {/* Rain particles */}
       {weather && weather.rainLevel > 0.1 && (
