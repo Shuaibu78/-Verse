@@ -3,15 +3,24 @@ import { OrbitControls } from "@react-three/drei";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 
-import { useWorldStore } from "../store/worldStore";
-import { usePlayerStore } from "../store/playerStore";
-
-import { createRNG } from "../logic/rng";
-import { generateCreatures, type Creature } from "../logic/creatures";
-import { generateWeather, type Weather } from "../logic/weather";
+import {
+  useWorldStore,
+  usePlayerStore,
+  createRNG,
+  generateCreatures,
+  generateWeather,
+  type Weather,
+} from "@piverse/game-engine";
 
 import { Howl } from "howler";
-import Landscape from "./Landscape";
+import TerrainChunks from "./TerrainChunks";
+import InstancedCreatures from "./InstancedCreatures";
+import Collectibles from "./Collectibles";
+import SurvivalSystem from "./SurvivalSystem";
+import PhotoModeRenderer from "./PhotoModeRenderer";
+import { Suspense } from "react";
+import { useGameStore } from "@piverse/game-engine";
+
 import { Sky } from "@react-three/drei";
 
 // --- Particle Rain ---
@@ -57,35 +66,7 @@ function RainParticles({ rainLevel }: { rainLevel: number }) {
   );
 }
 
-// --- Creature with AI Behavior ---
-function CreatureBehavior({ creature }: { creature: Creature }) {
-  const meshRef = useRef<THREE.Mesh>(null);
-  const { x: playerX, z: playerZ } = usePlayerStore();
-
-  useFrame(() => {
-    if (!meshRef.current) return;
-
-    // Simple random wander
-    meshRef.current.position.x += (Math.random() - 0.5) * 0.02 * creature.speed;
-    meshRef.current.position.z += (Math.random() - 0.5) * 0.02 * creature.speed;
-
-    // Flee player if too close
-    const dx = playerX - meshRef.current.position.x;
-    const dz = playerZ - meshRef.current.position.z;
-    const dist = Math.sqrt(dx * dx + dz * dz);
-    if (dist < 3) {
-      meshRef.current.position.x -= dx * 0.05;
-      meshRef.current.position.z -= dz * 0.05;
-    }
-  });
-
-  return (
-    <mesh ref={meshRef} position={[creature.x, creature.size / 2, creature.z]}>
-      <sphereGeometry args={[creature.size / 2, 16, 16]} />
-      <meshStandardMaterial color={creature.color} />
-    </mesh>
-  );
-}
+// (Old per-mesh creature removed; now using InstancedCreatures)
 
 // --- Camera Follow with OrbitControls ---
 function FollowCamera() {
@@ -120,28 +101,27 @@ function useWASDControls() {
 // --- Audio Ambient Sounds ---
 function useAmbientSounds(weather: Weather | null) {
   useEffect(() => {
-    if (!weather) return;
+    const rain = new Howl({ src: ["rain.mp3"], loop: true, volume: 0 });
+    const wind = new Howl({ src: ["wind.mp3"], loop: true, volume: 0 });
+    let visible = true;
 
-    const rainSound = new Howl({
-      src: ["rain.mp3"],
-      volume: weather.rainLevel,
-      loop: true,
-      autoplay: true,
-    });
+    const handleVisibility = () => {
+      visible = !document.hidden;
+      const targetRain = visible && weather ? weather.rainLevel : 0;
+      const targetWind = visible && weather ? weather.windSpeed / 10 : 0;
+      rain.fade(rain.volume(), targetRain, 300);
+      wind.fade(wind.volume(), targetWind, 300);
+    };
 
-    const windSound = new Howl({
-      src: ["wind.mp3"],
-      volume: weather.windSpeed / 10,
-      loop: true,
-      autoplay: true,
-    });
-
-    rainSound.play();
-    windSound.play();
+    rain.play();
+    wind.play();
+    document.addEventListener("visibilitychange", handleVisibility);
+    handleVisibility();
 
     return () => {
-      rainSound.stop();
-      windSound.stop();
+      document.removeEventListener("visibilitychange", handleVisibility);
+      rain.stop();
+      wind.stop();
     };
   }, [weather]);
 }
@@ -150,8 +130,8 @@ function useAmbientSounds(weather: Weather | null) {
 function WorldScene() {
   useWASDControls();
 
-  const { piSegment, setCreatures, setWeather, creatures, weather } =
-    useWorldStore();
+  const { piSegment, setCreatures, setWeather, weather } = useWorldStore();
+  const { gameMode } = useGameStore();
   const rng = useMemo(() => createRNG(piSegment), [piSegment]);
 
   const newCreatures = useMemo(() => generateCreatures(rng), [rng]);
@@ -171,6 +151,33 @@ function WorldScene() {
     const t = clock.getElapsedTime() * 0.05; // slower cycle
     const radius = 100;
     sunPos.current.set(Math.sin(t) * radius, Math.cos(t) * radius, 0);
+  });
+
+  // Adaptive resolution scaling based on FPS
+  const { gl } = useThree();
+  const lastTimeRef = useRef<number>(performance.now());
+  const frameCountRef = useRef(0);
+  const targetFps = 60;
+  const minRatio = 0.6;
+  const maxRatio = Math.min(1.5, window.devicePixelRatio);
+
+  useFrame(() => {
+    frameCountRef.current++;
+    const now = performance.now();
+    const dt = now - lastTimeRef.current;
+    if (dt >= 1000) {
+      const fps = (frameCountRef.current * 1000) / dt;
+      frameCountRef.current = 0;
+      lastTimeRef.current = now;
+      const current = gl.getPixelRatio();
+      if (fps < targetFps - 10) {
+        const next = Math.max(minRatio, current * 0.9);
+        if (Math.abs(next - current) > 0.01) gl.setPixelRatio(next);
+      } else if (fps > targetFps + 10) {
+        const next = Math.min(maxRatio, current * 1.05);
+        if (Math.abs(next - current) > 0.01) gl.setPixelRatio(next);
+      }
+    }
   });
 
   return (
@@ -193,7 +200,9 @@ function WorldScene() {
       <ambientLight intensity={0.5} />
 
       {/* Terrain */}
-      <Landscape />
+      <Suspense fallback={null}>
+        <TerrainChunks />
+      </Suspense>
 
       {/* Rain particles */}
       {weather && weather.rainLevel > 0.1 && (
@@ -201,9 +210,20 @@ function WorldScene() {
       )}
 
       {/* Creatures */}
-      {creatures.map((creature, i) => (
-        <CreatureBehavior key={i} creature={creature} />
-      ))}
+      <InstancedCreatures />
+
+      {/* Collectibles */}
+      <Suspense fallback={null}>
+        <Collectibles />
+      </Suspense>
+
+      {/* Survival System */}
+      <Suspense fallback={null}>
+        <SurvivalSystem />
+      </Suspense>
+
+      {/* Photo Mode Renderer */}
+      {gameMode === "photo" && <PhotoModeRenderer />}
 
       {/* Camera controls */}
       <FollowCamera />

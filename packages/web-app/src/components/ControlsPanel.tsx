@@ -1,6 +1,5 @@
 import { useState } from "react";
-import { useWorldStore } from "../store/worldStore";
-import { getPiSegment } from "../logic/piLoader";
+import { useWorldStore, getPiSegment } from "@piverse/game-engine";
 
 export default function ControlsPanel({ allDigits }: { allDigits: string }) {
   const [index, setIndex] = useState(0);

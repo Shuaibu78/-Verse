@@ -1,8 +1,7 @@
 import { useMemo } from "react";
 import * as THREE from "three";
 import { useLoader } from "@react-three/fiber";
-import { generateHeightMapFromPi } from "../logic/terrainHeightmap";
-import { useWorldStore } from "../store/worldStore";
+import { generateHeightMapFromPi, useWorldStore } from "@piverse/game-engine";
 
 export default function Landscape() {
   const piSegment = useWorldStore((s) => s.piSegment);
@@ -14,6 +13,7 @@ export default function Landscape() {
     [
       "/textures/grass_diffuse.jpg",
       "/textures/rock_diffuse.jpg",
+      // grass_normal may be missing; keep path but it might 404. We'll guard below.
       "/textures/grass_normal.jpg",
       "/textures/rock_normal.jpg",
     ]
@@ -38,11 +38,17 @@ export default function Landscape() {
   // Material logic: blend textures based on elevation (simple cutoff for now)
   const isMountain = piSegment.charAt(0) >= "7"; // crude terrain theme
 
+  // If grassNormal failed to load, it will be a texture with image=null
+  const hasGrassNormal = !!(grassNormal as unknown as { image?: unknown })
+    ?.image;
+
   return (
     <mesh geometry={geometry} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
       <meshStandardMaterial
         map={isMountain ? rockMap : grassMap}
-        normalMap={isMountain ? rockNormal : grassNormal}
+        normalMap={
+          isMountain ? rockNormal : hasGrassNormal ? grassNormal : undefined
+        }
         roughness={0.8}
         metalness={0.2}
       />
