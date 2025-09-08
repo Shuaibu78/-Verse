@@ -43,6 +43,8 @@ export interface WorldSeed {
   createdAt: number;
   playCount: number;
   rating: number;
+  ratingCount: number; // Track number of ratings
+  totalRatingPoints: number; // Track total rating points
   tags: string[];
   screenshot?: string;
 }
@@ -63,6 +65,13 @@ export class MultiplayerManager {
     return new Promise((resolve) => {
       // Simulate network delay
       setTimeout(() => {
+        // Initialize rating fields if not present
+        if (world.ratingCount === undefined) {
+          world.ratingCount = 1;
+          world.totalRatingPoints = world.rating || 3; // Default to 3 stars
+          world.rating = world.rating || 3;
+        }
+        
         this.sharedWorlds.push(world);
         this.saveSharedWorlds();
         resolve(true);
@@ -118,9 +127,20 @@ export class MultiplayerManager {
     return new Promise((resolve) => {
       setTimeout(() => {
         const world = this.sharedWorlds.find((w) => w.seed === seed);
-        if (world) {
-          // Simple rating update (in real app, this would be more sophisticated)
-          world.rating = (world.rating + rating) / 2;
+        if (world && rating >= 1 && rating <= 5) {
+          // Initialize rating data if not present (for backwards compatibility)
+          if (world.ratingCount === undefined) {
+            world.ratingCount = 1;
+            world.totalRatingPoints = world.rating;
+          }
+          
+          // Add the new rating to the total
+          world.totalRatingPoints += rating;
+          world.ratingCount += 1;
+          
+          // Calculate the new average rating
+          world.rating = world.totalRatingPoints / world.ratingCount;
+          
           this.saveSharedWorlds();
           resolve(true);
         } else {
